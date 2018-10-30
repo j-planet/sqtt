@@ -12,7 +12,8 @@ pd.set_option('display.max_columns', None)
 
 
 # paths
-rootdir = '/Users/jenny.jin/src/sqtt'   # todo: change this
+rootdir = '/Users/jj/Code/sqtt'   # todo: change this
+# rootdir = '/Users/jenny.jin/src/sqtt'   # todo: change this
 inputdir = path.join(rootdir, 'a2/q1/input')
 outputdir = path.join(rootdir, 'a2/q1/output')
 
@@ -134,9 +135,8 @@ def is_location_legit(tweet, locations_candidates):
         return None, False
 
     location_tokens = set([t.strip() for t in location.lower().split(',')])
-    legit_location = location_tokens.intersection(locations_candidates)
 
-    return location, bool()
+    return location, bool(location_tokens.intersection(locations_candidates))
 
 
 def get_location(tweet):
@@ -431,7 +431,8 @@ top_n_items([get_location(t) for t in us_tweets_2], n)
 """
 15. average lat long for every location
 """
-
+grouped_zipdf = zipstate_data.groupby(['city', 'state', 'county'], as_index=False).mean()
+del grouped_zipdf['zip_code']
 
 
 """
