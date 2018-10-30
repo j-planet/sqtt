@@ -6,7 +6,13 @@ import datetime
 from pytz import UTC
 import pandas as pd
 from io import StringIO
+from os import path
 
+pd.set_option('display.max_columns', None)
+
+
+# paths
+root_dir = '/Users/jj/Code/sqtt/a2/q3'
 
 # constants
 ROOT_URL = 'http://weather.unisys.com'
@@ -190,3 +196,19 @@ for s in raw_data:
          PATHS_STR: parse_paths_table(lines[2:])}
 
     data.append(d)
+
+
+"""
+6. impute missing wind speeds
+"""
+
+# windspeeds found on the interwebs
+windspeeds_table = pd.read_csv(path.join(root_dir, 'windspeeds.csv'))
+windspeeds_dict = dict(zip(windspeeds_table['STAT'], windspeeds_table['AVG_WIND_SPEED']))
+
+# This doesn't do anything because all wind speeds are available.
+for d in data:
+    df = d[PATHS_STR]
+    na_inds = df['WIND'].isna()
+    if na_inds.sum() > 0:
+        df['WIND'][na_inds].values = [windspeeds_dict[v] for v in df['STAT'][na_inds].values]
