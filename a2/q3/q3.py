@@ -3,6 +3,9 @@ import requests
 import re
 from pprint import pprint
 import datetime
+from pytz import UTC
+import pandas as pd
+from io import StringIO
 
 
 # constants
@@ -10,6 +13,11 @@ ROOT_URL = 'http://weather.unisys.com'
 MONTH_TO_INT = {'JAN': 1, 'FEB': 2, 'MAR':3, 'APR': 4,
                 'MAY': 5, 'JUN': 6, 'JUL':7, 'AUG': 8,
                 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+YEAR = 2017
+DATERANGE_STR = 'daterange'
+CATEGORY_STR = 'category'
+NAME_STR = 'name'
+PATHS_STR = 'paths'
 
 """
 1. what's the starting page for 2017?
@@ -104,22 +112,22 @@ Date | Category | Name | Table
 """
 
 
-def parse_date_range(s):
+def parse_date_range(input_str):
     """
-    :param s: e.g. 'Date: 27-28 DEC 2017'
+    :param input_str: e.g. 'Date: 27-28 DEC 2017'
     :return: begin date, end date
     """
 
     date_regex_1 = re.compile(r'Date: ([0-9]+)-([0-9]+) ([A-Z]+) ([0-9]+)')
     date_regex_2 = re.compile(r'Date: ([0-9]+) ([A-Z]+)-([0-9]+) ([A-Z]+) ([0-9]+)')
 
-    parsed = date_regex_1.findall(s)
+    parsed = date_regex_1.findall(input_str)
 
     if parsed:      # format 1: 'Date: 27-28 DEC 2017'
         d1, d2, month, year = parsed[0]
         m1 = m2 = month
     else:           # format 2: 'Date: 29 NOV-05 DEC 2017'
-        d1, m1, d2, m2, year = date_regex_2.findall(s)[0]
+        d1, m1, d2, m2, year = date_regex_2.findall(input_str)[0]
 
     date_begin = datetime.date(year=int(year), month=MONTH_TO_INT[m1], day=int(d1))
     date_end = datetime.date(year=int(year), month=MONTH_TO_INT[m2], day=int(d2))
@@ -127,9 +135,58 @@ def parse_date_range(s):
     return date_begin, date_end
 
 
+def parse_category(input_str):
+    """
+    :param input_str: line 2: 'Tropical Storm HILDA'
+    :return: 'Tropical Storm'
+    """
 
-s1 = raw_data[0].split('\n')[0]
-s2 = raw_data[3].split('\n')[0]
+    tokens = input_str.split(' ')
+    return ' '.join(tokens[:-1])
 
-parse_date_range(s1)
-parse_date_range(s2)
+
+def parse_name(input_str):
+    """
+    :param input_str: line 2: 'Tropical Storm HILDA'
+    :return: 'HILDA'
+    """
+
+    return input_str.split(' ')[-1]
+
+
+def parse_paths_table(lines):
+    def _zstr2datetime(s):
+        m, d, hr = s.replace('Z', '').split('/')
+        return datetime.datetime(year=YEAR, month=int(m), day=int(d),
+                                 hour=int(hr), tzinfo=UTC)
+
+    num_columns = 7
+
+    # prepare to conver to df: remove extra spaces etc
+    processed_str = re.sub(r' +', ' ', lines[0])
+
+    for line in lines[1:]:
+        tokens = list(filter(None, line.split(' ')))
+        stat = '_'.join(tokens[num_columns - 1:])
+        processed_str += '\n' + ' '.join(tokens[:num_columns - 1] + [stat])
+
+    df = pd.read_csv(StringIO(processed_str), sep=' ')
+
+    # convert z time string to datetime objects
+    df['TIME'] = df['TIME'].apply(_zstr2datetime)
+
+    return df
+
+
+data = []
+
+for s in raw_data:
+
+    lines = s.split('\n')
+
+    d = {DATERANGE_STR: parse_date_range(lines[0]),
+         CATEGORY_STR: parse_category(lines[1]),
+         NAME_STR: parse_name(lines[1]),
+         PATHS_STR: parse_paths_table(lines[2:])}
+
+    data.append(d)
