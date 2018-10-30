@@ -212,3 +212,14 @@ for d in data:
     na_inds = df['WIND'].isna()
     if na_inds.sum() > 0:
         df['WIND'][na_inds].values = [windspeeds_dict[v] for v in df['STAT'][na_inds].values]
+
+
+"""
+7. plot hurricane paths: wind speed | status | lat | lot
+"""
+
+# prepare data
+plot_data = pd.concat([d[PATHS_STR] for d in data])
+
+
+# todo: drawing paths on the map
