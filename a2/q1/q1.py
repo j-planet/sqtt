@@ -23,6 +23,9 @@ RETWEETED_STATUS_STR = 'retweeted_status'
 CREATED_STR = 'created'
 LEVEL_STR = 'level'
 HASHTAG_STR = 'hashtag'
+CITY_STR = 'city'
+COUNTY_STR = 'county'
+STATE_STR = 'state'
 
 """
 1. combine tweets2~tweets5.json into a single file
@@ -48,9 +51,7 @@ with open(output_fpath, 'w', encoding='utf8') as output_file_handle:
 
 print('Wrote %d lines to %s' % (len(tweets2_data), output_fpath))
 
-"""
-Determine the number of tweets in 1
-"""
+# Determine the number of tweets in 1
 
 tweets1_data = []
 
@@ -90,8 +91,14 @@ if '' in valid_locations:
 print('Read %d eligible locations.' % len(valid_locations))
 
 
-def get_hashtags_root(d):
-    return [t['text'] for t in d.get('entities', {}).get('hashtags') or []]
+def get_hashtags(tweet, does_include_retweet):
+    def _get_hashtags(d):
+        return [t['text'] for t in d.get('entities', {}).get('hashtags') or []]
+
+    if does_include_retweet:
+        return _get_hashtags(tweet) or _get_hashtags(tweet.get(RETWEETED_STATUS_STR, {}))
+    else:
+        return _get_hashtags(tweet)
 
 
 def process_tweet(tweet):
@@ -107,7 +114,7 @@ def process_tweet(tweet):
             return default
 
     # hashtags in entities or retweeted_status
-    hashtags = get_hashtags_root(tweet) or get_hashtags_root(tweet.get(RETWEETED_STATUS_STR, {}))
+    hashtags = get_hashtags(tweet, does_include_retweet=True)
 
     # convert tags to English
     english_hashtags = filter(lambda x: x is not None,
@@ -296,7 +303,7 @@ def get_hashtag_creation_bin_df(tweets, timebins):
 
     for tweet in tweets:
         ts = int(tweet[TIMESTAMP_STR])
-        hashtag_creations += [(tag, ts) for tag in get_hashtags_root(tweet)]
+        hashtag_creations += [(tag, ts) for tag in get_hashtags(tweet, does_include_retweet=False)]
 
         # todo: not including retweets because their timestamps may not fit into
         #       the post-creation time intervals from the previous step
@@ -395,7 +402,7 @@ zipstate_data = pd.read_csv(path.join(inputdir, 'zip_codes_states.csv'))
 """
 13. select tweets only in zip_codes_states.csv; not london
 """
-us_places = set(zipstate_data['city'].values).union(set(zipstate_data['county'].values))
+us_places = set(zipstate_data[CITY_STR].values).union(set(zipstate_data[COUNTY_STR].values))
 if np.nan in us_places:
     us_places.remove(np.nan)
 us_places = set([v.lower() for v in us_places])
@@ -431,10 +438,73 @@ top_n_items([get_location(t) for t in us_tweets_2], n)
 """
 15. average lat long for every location
 """
-grouped_zipdf = zipstate_data.groupby(['city', 'state', 'county'], as_index=False).mean()
+grouped_zipdf = zipstate_data.groupby([CITY_STR, STATE_STR, COUNTY_STR], as_index=False).mean()
 del grouped_zipdf['zip_code']
 
 
 """
-16. 1 + 2: location | count | 
+16. 1 + 2: location | count | lat | long
 """
+
+# combine 1 and 2
+alltweets = us_tweets_1 + us_tweets_2
+
+# create standardized us location mapping
+std_location_dict = {}      # {location token: row number}
+location_names = {CITY_STR: set(), COUNTY_STR: set()}
+
+for i, row in grouped_zipdf.iterrows():
+    for k in [CITY_STR, COUNTY_STR]:
+        key = row[k].lower()
+        location_names[k].add(key)
+
+        std_location_dict[key] = std_location_dict.get(key, []) + [i]
+
+# create data frames which contain locations, counts, longitude and latitude
+tuples = []
+for tweet in alltweets:
+    location = get_location(tweet)
+
+    if not location:
+        continue
+
+    location_tokens = set([t.strip() for t in location.lower().split(',')])
+    for token in location_tokens:
+        if token in std_location_dict:
+            num_hashtags = len(get_hashtags(tweet, does_include_retweet=True))
+
+            zipdf_row = grouped_zipdf.iloc[std_location_dict[token][0]]   # This isn't correct. But again the instrumentation wasn't correct to begin with.
+
+            tuples.append((zipdf_row[CITY_STR], zipdf_row[STATE_STR], zipdf_row[COUNTY_STR],
+                           zipdf_row['latitude'], zipdf_row['longitude'],
+                           num_hashtags))
+
+            continue
+
+location_df = pd.DataFrame(tuples,
+                           columns=[CITY_STR, STATE_STR, COUNTY_STR, 'latitude', 'longitude', 'num_hashtags'])
+
+
+"""
+17. plot number of hashtags on the us map
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.basemap import Basemap
+from matplotlib.colors import rgb2hex, Normalize
+from matplotlib.patches import Polygon
+from matplotlib.colorbar import ColorbarBase
+
+fig, ax = plt.subplots()
+
+# Lambert Conformal map of lower 48 states.
+m = Basemap(llcrnrlon=-119,llcrnrlat=20,urcrnrlon=-64,urcrnrlat=49,
+            projection='lcc',lat_1=33,lat_2=45,lon_0=-95)
+
+# draw state boundaries
+shp_info = m.readshapefile(path.join(inputdir, 'st99_d00'),
+                           'states',
+                           drawbounds=True,
+                           linewidth=0.45,
+                           color='gray')
